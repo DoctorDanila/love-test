@@ -1,4 +1,4 @@
-.PHONY: up down migrate load-fias test bash logs ps composer-install
+.PHONY: up down build migrate load-fias test bash logs ps composer-install
 
 # Переменные
 DOCKER_COMPOSE 	= docker compose
@@ -13,6 +13,10 @@ up:
 # Остановка и удаление контейнеров
 down:
 	$(DOCKER_COMPOSE) down
+
+# Сборка контейнера
+build:
+	$(DOCKER_COMPOSE) up -d --build
 
 # Применение миграций БД
 migrate:
