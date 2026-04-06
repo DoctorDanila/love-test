@@ -54,19 +54,4 @@ class Address extends ActiveRecord
             'created_at'    => 'Дата создания',
         ];
     }
-
-    /**
-     * Поиск адресов по вхождению строки
-     * @param string $query
-     * @return array
-     */
-    public static function autocomplete($query)
-    {
-        return self::find()
-            ->select(['id', 'full_address'])
-            ->where(['ilike', 'full_address', $query . '%', false])
-            ->limit(10)
-            ->asArray()
-            ->all();
-    }
 }
