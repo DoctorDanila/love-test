@@ -42,6 +42,16 @@ $config = [
             ],
         ],
     ],
+    'container' => [
+        'definitions' => [
+            app\services\AddressAutocompleteService::class => function () {
+                return new app\services\AddressAutocompleteService(
+                    new app\repositories\AddressRepository(),
+                    Yii::$app->cache
+                );
+            },
+        ],
+    ],
     'params' => $params,
 ];
 
