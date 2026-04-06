@@ -1,9 +1,57 @@
-version: '2'
+version: '3.8'
+
 services:
-  php:
-    image: yiisoftware/yii2-php:7.4-apache
+  app:
+    build:
+      context: .
+      dockerfile: docker/php/Dockerfile
+    container_name: yii2-app
+    restart: unless-stopped
+    working_dir: /app
     volumes:
-      - ~/.composer-docker/cache:/root/.composer/cache:delegated
-      - ./:/app:delegated
+      - .:/app
+      - /app/vendor
+    environment:
+      - APP_ENV=${APP_ENV}
+    depends_on:
+      - db
+      - cache
+
+  webserver:
+    image: nginx:1.25-alpine
+    container_name: yii2-nginx
+    restart: unless-stopped
     ports:
-      - '8000:80'
+      - "8080:80"
+    volumes:
+      - .:/app
+      - ./docker/nginx/default.conf:/etc/nginx/conf.d/default.conf
+    depends_on:
+      - app
+
+  db:
+    image: postgres:14-alpine
+    container_name: yii2-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  cache:
+    image: redis:7-alpine
+    container_name: yii2-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+
+volumes:
+  postgres_data:
+  redis_data:
