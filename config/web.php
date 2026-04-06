@@ -2,6 +2,7 @@
 
 $params = require __DIR__ . '/params.php';
 $db     = require __DIR__ . '/db.php';
+$redis  = require __DIR__ . '/redis.php';
 
 $config = [
     'id' => 'basic',
@@ -15,27 +16,21 @@ $config = [
         'request' => [
             'cookieValidationKey' => getenv('COOKIE_VALIDATION_KEY'),
         ],
+        'redis' =>$redis,
         'cache' => [
-            'class' => 'yii\caching\FileCache',
-        ],
-        'user' => [
-            'identityClass' => 'app\models\User',
-            'enableAutoLogin' => true,
-        ],
-        'errorHandler' => [
-            'errorAction' => 'site/error',
-        ],
-        'mailer' => [
-            'class' => \yii\symfonymailer\Mailer::class,
-            'viewPath' => '@app/mail',
-            'useFileTransport' => true,
+            'class' => 'yii\redis\Cache',
+            'redis' => 'redis',
         ],
         'log' => [
-            'traceLevel' => YII_DEBUG ? 3 : 0,
+            'traceLevel' => YII_DEBUG ? 1 : 0,
             'targets' => [
                 [
                     'class' => 'yii\log\FileTarget',
                     'levels' => ['error', 'warning'],
+                    'logVars' => [],
+                    'except' => [
+                        'yii\web\HttpException:404',
+                    ],
                 ],
             ],
         ],
