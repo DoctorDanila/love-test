@@ -14,6 +14,8 @@ services:
     environment:
       - POSTGRES_HOST=db
       - APP_ENV=${APP_ENV}
+      - REDIS_HOST=${REDIS_HOST}
+      - REDIS_PORT=${REDIS_PORT}
     depends_on:
       - db
       - cache
