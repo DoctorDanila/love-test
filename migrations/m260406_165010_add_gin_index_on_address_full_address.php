@@ -13,10 +13,7 @@ class m260406_165010_add_gin_index_on_address_full_address extends Migration
     {
         $this->execute('CREATE EXTENSION IF NOT EXISTS pg_trgm');
 
-        $this->execute(
-            'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_address_full_address_gin 
-             ON address USING gin (full_address gin_trgm_ops)'
-        );
+        $this->execute('CREATE INDEX IF NOT EXISTS idx_address_full_address_gin ON address USING gin (full_address gin_trgm_ops)');
     }
 
     /**
