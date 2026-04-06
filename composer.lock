@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "7309b9d2e4518ad52988e780a875afc0",
+    "content-hash": "191f042321ebc8708ab22031bf389ad0",
     "packages": [
         {
             "name": "bower-asset/inputmask",
@@ -2282,6 +2282,56 @@
                 "source": "https://github.com/Codeception/Verify/tree/3.4.0"
             },
             "time": "2026-02-22T22:13:25+00:00"
+        },
+        {
+            "name": "doctordanila/scancore",
+            "version": "v1.0.6",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/DoctorDanila/scancore.git",
+                "reference": "b9a844f47ad3b2349b8bdc3802e1c26e5156ecc2"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/DoctorDanila/scancore/zipball/b9a844f47ad3b2349b8bdc3802e1c26e5156ecc2",
+                "reference": "b9a844f47ad3b2349b8bdc3802e1c26e5156ecc2",
+                "shasum": ""
+            },
+            "require": {
+                "php": ">=7.4"
+            },
+            "bin": [
+                "bin/scancore"
+            ],
+            "type": "library",
+            "autoload": {
+                "psr-4": {
+                    "Scancore\\": "src/"
+                }
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "MIT"
+            ],
+            "authors": [
+                {
+                    "name": "Kuznetsov Danila",
+                    "email": "KD89504730600@yandex.ru",
+                    "homepage": "https://github.com/DoctorDanila",
+                    "role": "Developer"
+                },
+                {
+                    "name": "Script Agency",
+                    "homepage": "https://github.com/Factum-studio",
+                    "role": "Owner"
+                }
+            ],
+            "description": "Console tool to scan project structure and dump file contents, respecting .scancoreignore",
+            "support": {
+                "issues": "https://github.com/DoctorDanila/scancore/issues",
+                "source": "https://github.com/DoctorDanila/scancore/tree/v1.0.6"
+            },
+            "time": "2026-03-17T09:16:08+00:00"
         },
         {
             "name": "fakerphp/faker",
@@ -5535,7 +5585,7 @@
     "prefer-stable": false,
     "prefer-lowest": false,
     "platform": {
-        "php": ">=7.4.0"
+        "php": ">=8.1.0"
     },
     "platform-dev": {},
     "plugin-api-version": "2.6.0"

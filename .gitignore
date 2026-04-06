@@ -37,3 +37,7 @@ tests/_support/_generated
 
 # env
 .env
+
+# scancore
+.scancoreignore
+scancore_output.txt
