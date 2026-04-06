@@ -39,6 +39,8 @@ $config = [
             'enablePrettyUrl' => true,
             'showScriptName' => false,
             'rules' => [
+                'GET address/autocomplete' => 'address/autocomplete',
+                'GET address/<id:\d+>'     => 'address/view',
             ],
         ],
     ],
