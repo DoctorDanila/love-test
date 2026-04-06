@@ -12,6 +12,7 @@ services:
       - .:/app
       - /app/vendor
     environment:
+      - POSTGRES_HOST=db
       - APP_ENV=${APP_ENV}
     depends_on:
       - db
