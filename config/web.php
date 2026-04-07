@@ -6,6 +6,7 @@ $redis  = require __DIR__ . '/redis.php';
 
 $config = [
     'id' => 'basic',
+    'name' => $_ENV['APP_NAME'],
     'basePath' => dirname(__DIR__),
     'bootstrap' => ['log'],
     'aliases' => [
@@ -41,6 +42,7 @@ $config = [
             'rules' => [
                 'GET address/autocomplete' => 'address/autocomplete',
                 'GET address/<id:\d+>'     => 'address/view',
+                ''                         => 'site/index',
             ],
         ],
     ],
