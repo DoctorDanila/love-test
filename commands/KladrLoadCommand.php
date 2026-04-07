@@ -73,7 +73,6 @@ class KladrLoadCommand extends Controller
         }
 
         $this->loadKladrDict($kladrFile);
-
         $this->parseStreets($streetFile, $region);
 
         if ($houseFile && file_exists($houseFile)) {
@@ -191,9 +190,6 @@ class KladrLoadCommand extends Controller
         return implode(', ', $parts);
     }
 
-    /**
-     * Парсинг улиц с пакетной вставкой.
-     */
     private function parseStreets(string $streetFile, string $filterRegion): void
     {
         $this->stdout("Парсинг улиц...\n");
@@ -247,11 +243,38 @@ class KladrLoadCommand extends Controller
     }
 
     /**
-     * Парсинг домов с пакетной вставкой.
+     * Разбивает строку с номерами домов (разделители: запятая, точка с запятой, пробел)
+     * Например: "23,25,27,двлд1,двлд10,двлд11,двлд13" -> ['23','25','27','двлд1','двлд10','двлд11','двлд13']
      */
+    private function splitHouseNumbers(string $houseString): array
+    {
+        $houseString = trim($houseString);
+        if ($houseString === '') {
+            return [];
+        }
+        if (strpos($houseString, ',') !== false) {
+            $parts = explode(',', $houseString);
+        } elseif (strpos($houseString, ';') !== false) {
+            $parts = explode(';', $houseString);
+        } elseif (strpos($houseString, ' ') !== false && !preg_match('/\d+\s*-\s*\d+/', $houseString)) {
+            $parts = explode(' ', $houseString);
+        } else {
+            $parts = [$houseString];
+        }
+
+        $result = [];
+        foreach ($parts as $part) {
+            $part = trim($part);
+            if ($part !== '') {
+                $result[] = $part;
+            }
+        }
+        return $result;
+    }
+
     private function parseHouses(string $houseFile, string $filterRegion): void
     {
-        $this->stdout("Парсинг домов...\n");
+        $this->stdout("Парсинг домов с разбивкой составных номеров...\n");
         $table = new TableReader($houseFile);
         $recordCount = $table->getRecordCount();
         $this->stdout("Записей в DOMA.DBF: $recordCount\n");
@@ -272,29 +295,34 @@ class KladrLoadCommand extends Controller
             $streetAddress = $this->buildFullAddress($streetCode);
             if (empty($streetAddress)) continue;
 
-            $houseNumber = $this->normalize($record->get('name'));
-            if (empty($houseNumber)) continue;
+            $houseNumberRaw = $this->normalize($record->get('name'));
+            if (empty($houseNumberRaw)) continue;
 
-            $fullAddress = $streetAddress . ', д. ' . $houseNumber;
+            $houseNumbers = $this->splitHouseNumbers($houseNumberRaw);
+            if (empty($houseNumbers)) continue;
 
-            $batch[] = [
-                'full_address' => $fullAddress,
-                'region'       => $realRegion,
-                'city'         => null,
-                'street'       => null,
-                'house'        => $houseNumber,
-                'created_at'   => date('Y-m-d H:i:s'),
-            ];
-            $total++;
+            foreach ($houseNumbers as $singleHouse) {
+                $fullAddress = $streetAddress . ', д. ' . $singleHouse;
 
-            if ($total - $lastReport >= 10000) {
-                $this->stdout("Обработано домов: $total\r");
-                $lastReport = $total;
-            }
+                $batch[] = [
+                    'full_address' => $fullAddress,
+                    'region'       => $realRegion,
+                    'city'         => null,
+                    'street'       => null,
+                    'house'        => $singleHouse,
+                    'created_at'   => date('Y-m-d H:i:s'),
+                ];
+                $total++;
 
-            if (count($batch) >= $batchSize) {
-                $this->insertBatch($batch);
-                $batch = [];
+                if ($total - $lastReport >= 10000) {
+                    $this->stdout("Обработано домов: $total\r");
+                    $lastReport = $total;
+                }
+
+                if (count($batch) >= $batchSize) {
+                    $this->insertBatch($batch);
+                    $batch = [];
+                }
             }
         }
 
