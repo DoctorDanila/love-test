@@ -29,6 +29,7 @@ $config = [
     ],
     'params' => $params,
     'controllerMap' => [
+        'fias' => 'app\commands\FiasLoadCommand',
         'kladr' => 'app\commands\KladrLoadCommand',
     ],
 ];
