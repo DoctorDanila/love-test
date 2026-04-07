@@ -4,47 +4,55 @@ namespace app\repositories;
 
 use app\models\Address;
 use app\dto\AddressSuggestionDto;
-use yii\db\ActiveRecord;
 
 class AddressRepository
 {
     /**
-     * Поиск адресов по началу строки (ILIKE 'query%')
-     * @param string $query
-     * @param int $limit
-     * @return AddressSuggestionDto[]
+     * Быстрый префиксный поиск (использует индекс idx_address_lower_prefix)
      */
-    public function search(string $query, int $limit): array
+    public function searchByPrefix(string $query, int $limit): array
     {
-        $normalizedQuery = $this->normalizeString($query);
-
-        if (mb_strlen($normalizedQuery) < 2) {
+        $normalized = $this->normalizeString($query);
+        if (mb_strlen($normalized) < 2) {
             return [];
         }
 
         $rows = Address::find()
             ->select(['id', 'full_address'])
-            ->where('similarity(full_address, :q) > 0.3', [':q' => $normalizedQuery])
-            ->orderBy(['similarity(full_address, :q)' => SORT_DESC])
+            ->where('lower(full_address) LIKE :prefix', [':prefix' => $normalized . '%'])
+            ->orderBy(['full_address' => SORT_ASC])
             ->limit($limit)
             ->asArray()
             ->all();
 
-        if (empty($rows)) {
-            $rows = Address::find()
-                ->select(['id', 'full_address'])
-                ->where(['ilike', 'full_address', $normalizedQuery . '%', false])
-                ->limit($limit)
-                ->asArray()
-                ->all();
+        return array_map(fn($row) => new AddressSuggestionDto($row['id'], $row['full_address']), $rows);
+    }
+
+    /**
+     * Медленный поиск по сходству (для опечаток, пунктуации)
+     * Использует GIN-индекс pg_trgm
+     */
+    public function searchBySimilarity(string $query, int $limit): array
+    {
+        $normalized = $this->normalizeString($query);
+        if (mb_strlen($normalized) < 3) {
+            return [];
         }
+
+        $rows = Address::find()
+            ->select(['id', 'full_address'])
+            ->where('full_address % :q', [':q' => $normalized])
+            ->orderBy(['similarity(full_address, :q)' => SORT_DESC])
+            ->limit($limit)
+            ->asArray()
+            ->all();
 
         return array_map(fn($row) => new AddressSuggestionDto($row['id'], $row['full_address']), $rows);
     }
 
     private function normalizeString(string $str): string
     {
-        $str = mb_strtolower(trim($str));
+        $str = trim(mb_strtolower($str));
         $str = preg_replace('/[[:punct:]]/', ' ', $str);
         $str = preg_replace('/\s+/', ' ', $str);
         return $str;
@@ -58,5 +66,10 @@ class AddressRepository
     public function findById(int $id): ?Address
     {
         return Address::findOne($id);
+    }
+
+    public function getTotalCount(): int
+    {
+        return Address::find()->count();
     }
 }
