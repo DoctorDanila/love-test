@@ -1,0 +1,9 @@
+.site-index {
+    padding-top: 60px;
+}
+#loading-spinner {
+    z-index: 10;
+    pointer-events: none;
+    top: 39px;
+    right: 10px;
+}

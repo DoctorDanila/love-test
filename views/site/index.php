@@ -1,7 +1,5 @@
 <?php
 
-/** @var yii\web\View $this */
-
 use yii\helpers\Url;
 
 $this->title = 'Поиск адресов';
@@ -14,11 +12,15 @@ $this->title = 'Поиск адресов';
                         <h3 class="card-title">Поиск адреса (ФИАС / КЛАДР)</h3>
                     </div>
                     <div class="card-body">
-                        <div class="mb-3">
+                        <div class="mb-3 position-relative">
                             <label for="address-input" class="form-label">Начните вводить адрес</label>
                             <input type="text" id="address-input" class="form-control" autocomplete="off"
-                                   placeholder="Например, Пермский край, г Пермь, ул..."
-                                   maxlength="200">
+                                   placeholder="Например, Пермский край, г Пермь, ул...">
+                            <div id="loading-spinner" class="position-absolute" style="display: none;">
+                                <div class="spinner-border spinner-border-sm text-primary" role="status">
+                                    <span class="visually-hidden">Загрузка...</span>
+                                </div>
+                            </div>
                             <div id="address-error" class="invalid-feedback" style="display: none;"></div>
                             <div id="suggestions" class="list-group mt-2" style="display: none;"></div>
                         </div>
@@ -30,6 +32,17 @@ $this->title = 'Поиск адресов';
                         </div>
                     </div>
                 </div>
+                <div class="row justify-content-center mt-4">
+                    <div class="col-md-8">
+                        <div class="card bg-light">
+                            <div class="card-body text-center">
+                                <div id="stats-placeholder">
+                                    <span class="spinner-border spinner-border-sm text-secondary"></span> Загрузка статистики...
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
@@ -37,15 +50,23 @@ $this->title = 'Поиск адресов';
 <?php
 $this->registerJsFile('https://code.jquery.com/jquery-3.7.1.min.js', ['position' => \yii\web\View::POS_HEAD]);
 
-$autocompleteUrl = Url::to(['/address/autocomplete']);
+$fastUrl = Url::to(['/address/autocomplete']);
+$slowUrl = Url::to(['/address/autocomplete-slow']);
+
 $script = <<<JS
-    let currentRequest = null;
+    let fastRequest = null;
+    let slowRequest = null;
+    let debounceTimer;
+    let currentFastItems = [];
+
     const \$input = $('#address-input');
     const \$suggestions = $('#suggestions');
     const \$selected = $('#selected-address');
     const \$errorDiv = $('#address-error');
+    const \$spinner = $('#loading-spinner');
     
-    const allowedRegex = /^[а-яА-Яa-zA-Z0-9\\s\\-\\.,\\(\\)\\"\'\\/]+$/;
+    function showSpinner() { \$spinner.show(); }
+    function hideSpinner() { \$spinner.hide(); }
 
     function validateInput(value) {
         const trimmed = value.trim();
@@ -61,82 +82,45 @@ $script = <<<JS
             showError('Адрес не может быть длиннее 200 символов.');
             return false;
         }
-        if (!allowedRegex.test(trimmed)) {
-            showError('Адрес может содержать только буквы, цифры, пробелы, дефис, точку, запятую, скобки, кавычки и слеш.');
-            return false;
-        }
         clearError();
         return true;
     }
 
-    function showError(message) {
+    function showError(msg) {
         \$input.addClass('is-invalid');
-        \$errorDiv.text(message).show();
+        \$errorDiv.text(msg).show();
     }
-
     function clearError() {
         \$input.removeClass('is-invalid');
         \$errorDiv.hide();
     }
 
-    let debounceTimer;
-    \$input.on('keyup', function() {
-        clearTimeout(debounceTimer);
-        const rawValue = \$(this).val();
-        const isValid = validateInput(rawValue);
-        
-        if (!isValid) {
-            \$suggestions.empty().hide();
-            if (currentRequest && currentRequest.abort) {
-                currentRequest.abort();
-            }
-            return;
-        }
-        
-        const query = rawValue.trim();
-        if (query.length < 2) {
-            \$suggestions.empty().hide();
-            return;
-        }
-        
-        debounceTimer = setTimeout(() => {
-            if (currentRequest && currentRequest.abort) {
-                currentRequest.abort();
-            }
-            currentRequest = $.ajax({
-                url: '$autocompleteUrl',
-                data: { q: query, limit: 10 },
-                dataType: 'json',
-                success: function(data) {
-                    renderSuggestions(data);
-                },
-                error: function(xhr) {
-                    if (xhr.statusText !== 'abort') {
-                        console.error('Ошибка загрузки подсказок');
-                        showError('Не удалось загрузить подсказки. Попробуйте позже.');
-                    }
-                },
-                complete: function() {
-                    currentRequest = null;
-                }
-            });
-        }, 300);
-    });
+    function mergeUnique(fast, slow) {
+        const map = new Map();
+        fast.forEach(item => map.set(item.full_address, item));
+        slow.forEach(item => {
+            if (!map.has(item.full_address)) map.set(item.full_address, item);
+        });
+        return Array.from(map.values());
+    }
 
-    function renderSuggestions(items) {
+    function renderSuggestions(items, isSlowIncluded = false) {
         \$suggestions.empty();
         if (!items.length) {
             \$suggestions.hide();
             return;
         }
-        for (let i = 0; i < items.length; i++) {
-            const item = items[i];
+        for (let item of items) {
             const \$btn = $('<button type="button" class="list-group-item list-group-item-action"></button>')
                 .text(item.full_address)
                 .on('click', function() {
                     selectAddress(item.full_address);
                 });
             \$suggestions.append(\$btn);
+        }
+        if (!isSlowIncluded && items.length > 0) {
+            // Показываем индикатор, что ещё загружаются похожие адреса
+            \$suggestions.append('<div class="list-group-item text-muted small" id="slow-loader">Загружаем похожие адреса...</div>');
         }
         \$suggestions.show();
     }
@@ -146,6 +130,9 @@ $script = <<<JS
         \$input.val(fullAddress);
         \$suggestions.empty().hide();
         clearError();
+        if (slowRequest) slowRequest.abort();
+        if (fastRequest) fastRequest.abort();
+        hideSpinner();
     }
 
     function escapeHtml(str) {
@@ -157,10 +144,85 @@ $script = <<<JS
         });
     }
 
+    \$input.on('keyup', function() {
+        clearTimeout(debounceTimer);
+        const raw = \$(this).val();
+        const isValid = validateInput(raw);
+        if (!isValid) {
+            \$suggestions.empty().hide();
+            if (fastRequest) fastRequest.abort();
+            if (slowRequest) slowRequest.abort();
+            hideSpinner();
+            return;
+        }
+        const query = raw.trim();
+        if (query.length < 2) {
+            \$suggestions.empty().hide();
+            return;
+        }
+
+        debounceTimer = setTimeout(() => {
+            // Отменяем предыдущие запросы
+            if (fastRequest) fastRequest.abort();
+            if (slowRequest) slowRequest.abort();
+
+            showSpinner();
+
+            // 1. Быстрый префиксный запрос
+            fastRequest = $.ajax({
+                url: '$fastUrl',
+                data: { q: query, limit: 10 },
+                dataType: 'json',
+                success: function(fastItems) {
+                    currentFastItems = fastItems;
+                    renderSuggestions(fastItems, false);
+                    hideSpinner();
+
+                    // 2. Медленный similarity-запрос
+                    slowRequest = $.ajax({
+                        url: '$slowUrl',
+                        data: { q: query, limit: 10 },
+                        dataType: 'json',
+                        success: function(slowItems) {
+                            const merged = mergeUnique(currentFastItems, slowItems);
+                            renderSuggestions(merged, true);
+                            // Удаляем индикатор "Загружаем похожие адреса" если был
+                            $('#slow-loader').remove();
+                        },
+                        error: function() {
+                            // Если медленный запрос упал, просто оставляем быстрые результаты
+                            $('#slow-loader').remove();
+                        }
+                    });
+                },
+                error: function() {
+                    hideSpinner();
+                    showError('Не удалось загрузить подсказки');
+                }
+            });
+        }, 300);
+    });
+
     $(document).on('click', function(e) {
         if (!\$(e.target).closest('#address-input, #suggestions').length) {
             \$suggestions.hide();
         }
     });
+    $(document).ready(function() {
+    $.ajax({
+        url: '/address/stats',
+        dataType: 'json',
+        success: function(data) {
+            $('#stats-placeholder').html(`
+                <i class="bi bi-database"></i> 
+                Всего адресов в базе: <strong>\${data.total.toLocaleString()}</strong>
+                <span class="text-muted small ms-2">(обновлено \${data.updated_at})</span>
+            `);
+        },
+        error: function() {
+            $('#stats-placeholder').html('<span class="text-danger">Не удалось загрузить статистику</span>');
+        }
+    });
+});
 JS;
 $this->registerJs($script, \yii\web\View::POS_READY);
