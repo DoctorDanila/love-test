@@ -16,7 +16,10 @@ $this->title = 'Поиск адресов';
                     <div class="card-body">
                         <div class="mb-3">
                             <label for="address-input" class="form-label">Начните вводить адрес</label>
-                            <input type="text" id="address-input" class="form-control" autocomplete="off" placeholder="Например, Пермский край, г Пермь, ул...">
+                            <input type="text" id="address-input" class="form-control" autocomplete="off"
+                                   placeholder="Например, Пермский край, г Пермь, ул..."
+                                   maxlength="200">
+                            <div id="address-error" class="invalid-feedback" style="display: none;"></div>
                             <div id="suggestions" class="list-group mt-2" style="display: none;"></div>
                         </div>
                         <div class="mt-4">
@@ -32,7 +35,6 @@ $this->title = 'Поиск адресов';
     </div>
 
 <?php
-// Подключаем jQuery с CDN (если не загружен в AppAsset)
 $this->registerJsFile('https://code.jquery.com/jquery-3.7.1.min.js', ['position' => \yii\web\View::POS_HEAD]);
 
 $autocompleteUrl = Url::to(['/address/autocomplete']);
@@ -41,15 +43,62 @@ $script = <<<JS
     const \$input = $('#address-input');
     const \$suggestions = $('#suggestions');
     const \$selected = $('#selected-address');
+    const \$errorDiv = $('#address-error');
+    
+    const allowedRegex = /^[а-яА-Яa-zA-Z0-9\\s\\-\\.,\\(\\)\\"\'\\/]+$/;
+
+    function validateInput(value) {
+        const trimmed = value.trim();
+        if (trimmed.length === 0) {
+            showError('Пожалуйста, введите адрес.');
+            return false;
+        }
+        if (trimmed.length < 2) {
+            showError('Введите минимум 2 символа.');
+            return false;
+        }
+        if (trimmed.length > 200) {
+            showError('Адрес не может быть длиннее 200 символов.');
+            return false;
+        }
+        if (!allowedRegex.test(trimmed)) {
+            showError('Адрес может содержать только буквы, цифры, пробелы, дефис, точку, запятую, скобки, кавычки и слеш.');
+            return false;
+        }
+        clearError();
+        return true;
+    }
+
+    function showError(message) {
+        \$input.addClass('is-invalid');
+        \$errorDiv.text(message).show();
+    }
+
+    function clearError() {
+        \$input.removeClass('is-invalid');
+        \$errorDiv.hide();
+    }
 
     let debounceTimer;
     \$input.on('keyup', function() {
         clearTimeout(debounceTimer);
-        const query = \$(this).val().trim();
-        if (query.length === 0) {
+        const rawValue = \$(this).val();
+        const isValid = validateInput(rawValue);
+        
+        if (!isValid) {
+            \$suggestions.empty().hide();
+            if (currentRequest && currentRequest.abort) {
+                currentRequest.abort();
+            }
+            return;
+        }
+        
+        const query = rawValue.trim();
+        if (query.length < 2) {
             \$suggestions.empty().hide();
             return;
         }
+        
         debounceTimer = setTimeout(() => {
             if (currentRequest && currentRequest.abort) {
                 currentRequest.abort();
@@ -64,6 +113,7 @@ $script = <<<JS
                 error: function(xhr) {
                     if (xhr.statusText !== 'abort') {
                         console.error('Ошибка загрузки подсказок');
+                        showError('Не удалось загрузить подсказки. Попробуйте позже.');
                     }
                 },
                 complete: function() {
@@ -95,6 +145,7 @@ $script = <<<JS
         \$selected.html('<span>' + escapeHtml(fullAddress) + '</span>');
         \$input.val(fullAddress);
         \$suggestions.empty().hide();
+        clearError();
     }
 
     function escapeHtml(str) {
