@@ -12,9 +12,7 @@ use XBase\TableReader;
 class KladrLoadCommand extends Controller
 {
     private const FIAS_API_URL = 'https://fias.nalog.ru/WebServices/Public/GetAllDownloadFileInfo';
-
     private string $tempDir = '@runtime/kladr_temp';
-
     private array $kladrDict = [];
 
     public function init()
@@ -26,14 +24,20 @@ class KladrLoadCommand extends Controller
         }
     }
 
+    /**
+     * Загрузка КЛАДР (улицы + дома).
+     * Примеры:
+     *   php yii kladr/load 00 --local=/path/to/kladr.7z   # все регионы
+     *   php yii kladr/load 59 --local=/path/to/kladr.7z   # только Пермский край
+     */
     public function actionLoad($region = null, $local = null)
     {
         if (!$region) {
-            $this->stderr("Укажите регион: php yii kladr/load 59 [--local=/path/to/kladr.7z]\n", Console::FG_RED);
+            $this->stderr("Укажите регион для фильтрации (00 — все регионы): php yii kladr/load 59 [--local=/path/to/kladr.7z]\n", Console::FG_RED);
             return ExitCode::UNSPECIFIED_ERROR;
         }
 
-        $this->stdout("Регион: $region\n", Console::FG_GREEN);
+        $this->stdout("Фильтр региона: $region (00 — без фильтра)\n", Console::FG_GREEN);
 
         $archivePath = null;
         if ($local !== null) {
@@ -48,27 +52,20 @@ class KladrLoadCommand extends Controller
             $this->stdout("Используем локальный архив: $archivePath\n", Console::FG_GREEN);
         } else {
             $meta = $this->getMeta();
-            if (!$meta) {
-                $this->stderr("Не удалось получить метаданные от API. Попробуйте --local\n", Console::FG_RED);
-                return ExitCode::UNSPECIFIED_ERROR;
-            }
-            if (empty($meta['Kladr47ZUrl'])) {
-                $this->stderr("В метаданных нет ссылки на КЛАДР\n", Console::FG_RED);
+            if (!$meta || empty($meta['Kladr47ZUrl'])) {
+                $this->stderr("Не удалось получить ссылку на КЛАДР. Используйте --local\n", Console::FG_RED);
                 return ExitCode::UNSPECIFIED_ERROR;
             }
             $archivePath = $this->download($meta['Kladr47ZUrl'], 'kladr.7z');
-            if (!$archivePath) {
-                return ExitCode::UNSPECIFIED_ERROR;
-            }
+            if (!$archivePath) return ExitCode::UNSPECIFIED_ERROR;
         }
 
         $extractDir = $this->extract($archivePath);
-        if (!$extractDir) {
-            return ExitCode::UNSPECIFIED_ERROR;
-        }
+        if (!$extractDir) return ExitCode::UNSPECIFIED_ERROR;
 
         $kladrFile = $this->findFile($extractDir, 'KLADR.DBF');
         $streetFile = $this->findFile($extractDir, 'STREET.DBF');
+        $houseFile = $this->findFile($extractDir, 'DOMA.DBF');
 
         if (!$kladrFile || !$streetFile) {
             $this->stderr("Не найдены KLADR.DBF или STREET.DBF\n", Console::FG_RED);
@@ -76,7 +73,14 @@ class KladrLoadCommand extends Controller
         }
 
         $this->loadKladrDict($kladrFile);
+
         $this->parseStreets($streetFile, $region);
+
+        if ($houseFile && file_exists($houseFile)) {
+            $this->parseHouses($houseFile, $region);
+        } else {
+            $this->stdout("Файл DOMA.DBF не найден, дома не загружены.\n", Console::FG_YELLOW);
+        }
 
         $this->cleanup();
         $this->stdout("Готово!\n", Console::FG_GREEN);
@@ -137,75 +141,38 @@ class KladrLoadCommand extends Controller
         return null;
     }
 
-    /**
-     * Нормализация кодировки из CP866 в UTF-8.
-     * Приоритет: mb_convert_encoding -> iconv -> оставить как есть.
-     */
     private function normalize(?string $value): ?string
     {
         if ($value === null || $value === '') return null;
-
-        // Пробуем mb_convert_encoding с CP866
-        $encodings = ['CP866', 'Windows-1251', 'KOI8-R', 'UTF-8'];
-        foreach ($encodings as $enc) {
-            $converted = @mb_convert_encoding($value, 'UTF-8', $enc);
-            if ($converted !== false && $converted !== '' && $converted !== $value) {
-                return trim($converted);
-            }
+        $converted = @mb_convert_encoding($value, 'UTF-8', 'CP866');
+        if ($converted === false || $converted === '') {
+            $converted = @iconv('CP866', 'UTF-8//IGNORE', $value);
         }
-        // Если ничего не помогло, возвращаем как есть
-        return trim($value);
+        return trim($converted);
     }
 
     private function loadKladrDict(string $kladrFile): void
     {
         $this->stdout("Загрузка словаря KLADR...\n");
-        $this->stdout("Файл: $kladrFile\n");
-        $this->stdout("Размер: " . filesize($kladrFile) . " байт\n");
+        $table = new TableReader($kladrFile);
+        $this->stdout("Записей: " . $table->getRecordCount() . "\n");
 
-        try {
-            $table = new TableReader($kladrFile);
-            $recordCount = $table->getRecordCount();
-            $this->stdout("Записей: $recordCount\n");
-
-            $columns = $table->getColumns();
-            $this->stdout("Поля: " . implode(', ', array_keys($columns)) . "\n");
-
-            if ($recordCount == 0) return;
-
-            $count = 0;
-            $i = 0;
-            while ($record = $table->nextRecord()) {
-                if ($i < 5) {
-                    $this->stdout(sprintf(
-                        "Запись %d: code='%s', name='%s', socr='%s'\n",
-                        $i,
-                        $record->get('code'),
-                        $record->get('name'),
-                        $record->get('socr')
-                    ));
-                    $i++;
-                }
-                $code = $record->get('code');
-                if (!$code) continue;
-                $name = $this->normalize($record->get('name'));
-                $socr = $this->normalize($record->get('socr'));
-                if ($name === null) continue;
-                $fullName = ($socr ? $socr . ' ' : '') . $name;
-                $this->kladrDict[$code] = $fullName;
-                $count++;
-            }
-            $this->stdout("Загружено объектов: $count\n", Console::FG_GREEN);
-        } catch (\Exception $e) {
-            $this->stderr("Ошибка: " . $e->getMessage() . "\n", Console::FG_RED);
+        while ($record = $table->nextRecord()) {
+            $code = $record->get('code');
+            if (!$code) continue;
+            $name = $this->normalize($record->get('name'));
+            $socr = $this->normalize($record->get('socr'));
+            if ($name === null) continue;
+            $fullName = ($socr ? $socr . ' ' : '') . $name;
+            $this->kladrDict[$code] = $fullName;
         }
+        $this->stdout("Загружено объектов: " . count($this->kladrDict) . "\n", Console::FG_GREEN);
     }
 
     private function buildFullAddress(string $code): string
     {
         $parts = [];
         $currentCode = $code;
-
         while (strlen($currentCode) > 0) {
             if (isset($this->kladrDict[$currentCode])) {
                 array_unshift($parts, $this->kladrDict[$currentCode]);
@@ -213,140 +180,142 @@ class KladrLoadCommand extends Controller
             } else {
                 $currentCode = substr($currentCode, 0, -1);
             }
-
             if (strlen($currentCode) === 2) {
                 if (isset($this->kladrDict[$currentCode])) {
                     array_unshift($parts, $this->kladrDict[$currentCode]);
                 }
                 break;
             }
-
             if (strlen($currentCode) === 0) break;
         }
-
         return implode(', ', $parts);
     }
 
-    private function parseStreets(string $streetFile, string $region): void
+    /**
+     * Парсинг улиц с пакетной вставкой.
+     */
+    private function parseStreets(string $streetFile, string $filterRegion): void
     {
         $this->stdout("Парсинг улиц...\n");
-        $this->stdout("Файл: $streetFile\n");
-        $this->stdout("Размер: " . filesize($streetFile) . " байт\n");
+        $table = new TableReader($streetFile);
+        $recordCount = $table->getRecordCount();
+        $this->stdout("Записей в STREET.DBF: $recordCount\n");
 
-        try {
-            $table = new TableReader($streetFile);
-            $recordCount = $table->getRecordCount();
-            $this->stdout("Записей: $recordCount\n");
+        $batch = [];
+        $total = 0;
+        $batchSize = 1000;
+        $lastReport = 0;
 
-            $columns = $table->getColumns();
-            $this->stdout("Поля: " . implode(', ', array_keys($columns)) . "\n");
+        while ($record = $table->nextRecord()) {
+            $code = $record->get('code');
+            if (!$code) continue;
 
-            if ($recordCount == 0) return;
+            $realRegion = substr($code, 0, 2);
+            if ($filterRegion !== '00' && $realRegion != $filterRegion) continue;
 
-            $batch = [];
-            $total = 0;
-            $batchSize = 1000;
-            $lastReport = 0;
+            $shortCode = substr($code, 0, 13);
+            $cityAddress = $this->buildFullAddress($shortCode);
+            if (empty($cityAddress)) continue;
 
-            while ($record = $table->nextRecord()) {
-                $code = $record->get('code');
-                if (!$code) continue;
+            $streetName = $this->normalize($record->get('name'));
+            $cityName = $this->kladrDict[$shortCode] ?? null;
+            $fullAddress = $cityAddress . ($streetName ? ', ' . $streetName : '');
 
-                // Фильтр по региону (закомментирован, можно раскомментировать позже)
-                // if (substr($code, 0, 2) != $region) continue;
+            $batch[] = [
+                'full_address' => $fullAddress,
+                'region'       => $realRegion,
+                'city'         => $cityName,
+                'street'       => $streetName,
+                'house'        => null,
+                'created_at'   => date('Y-m-d H:i:s'),
+            ];
+            $total++;
 
-                // Обрезаем до 13 символов (код населённого пункта)
-                $shortCode = substr($code, 0, 13);
-
-                $cityAddress = $this->buildFullAddress($shortCode);
-                if (empty($cityAddress)) {
-                    continue; // пропускаем, если не удалось собрать адрес города
-                }
-
-                $streetName = $this->normalize($record->get('name'));
-                $cityName = $this->kladrDict[$shortCode] ?? null;
-                $fullAddress = $cityAddress . ($streetName ? ', ' . $streetName : '');
-
-                $batch[] = [
-                    'full_address' => $fullAddress,
-                    'region'       => $region, // регион из параметра (может не совпадать с реальным)
-                    'city'         => $cityName,
-                    'street'       => $streetName,
-                    'house'        => null,
-                    'created_at'   => date('Y-m-d H:i:s'),
-                ];
-                $total++;
-
-                // Периодический вывод прогресса
-                if ($total - $lastReport >= 10000) {
-                    $this->stdout("Обработано улиц: $total\r");
-                    $lastReport = $total;
-                }
-
-                if (count($batch) >= $batchSize) {
-                    $this->insertBatch($batch);
-                    $batch = [];
-                }
+            if ($total - $lastReport >= 10000) {
+                $this->stdout("Обработано улиц: $total\r");
+                $lastReport = $total;
             }
 
-            // Вставка оставшихся
-            if (!empty($batch)) {
+            if (count($batch) >= $batchSize) {
                 $this->insertBatch($batch);
+                $batch = [];
+            }
+        }
+
+        if (!empty($batch)) $this->insertBatch($batch);
+        $this->stdout("\nУлиц загружено: $total\n", Console::FG_GREEN);
+    }
+
+    /**
+     * Парсинг домов с пакетной вставкой.
+     */
+    private function parseHouses(string $houseFile, string $filterRegion): void
+    {
+        $this->stdout("Парсинг домов...\n");
+        $table = new TableReader($houseFile);
+        $recordCount = $table->getRecordCount();
+        $this->stdout("Записей в DOMA.DBF: $recordCount\n");
+
+        $batch = [];
+        $total = 0;
+        $batchSize = 1000;
+        $lastReport = 0;
+
+        while ($record = $table->nextRecord()) {
+            $code = $record->get('code');
+            if (!$code) continue;
+
+            $realRegion = substr($code, 0, 2);
+            if ($filterRegion !== '00' && $realRegion != $filterRegion) continue;
+
+            $streetCode = substr($code, 0, 13);
+            $streetAddress = $this->buildFullAddress($streetCode);
+            if (empty($streetAddress)) continue;
+
+            $houseNumber = $this->normalize($record->get('name'));
+            if (empty($houseNumber)) continue;
+
+            $fullAddress = $streetAddress . ', д. ' . $houseNumber;
+
+            $batch[] = [
+                'full_address' => $fullAddress,
+                'region'       => $realRegion,
+                'city'         => null,
+                'street'       => null,
+                'house'        => $houseNumber,
+                'created_at'   => date('Y-m-d H:i:s'),
+            ];
+            $total++;
+
+            if ($total - $lastReport >= 10000) {
+                $this->stdout("Обработано домов: $total\r");
+                $lastReport = $total;
             }
 
-            $this->stdout("\nУлиц загружено: $total\n", Console::FG_GREEN);
-        } catch (\Exception $e) {
-            $this->stderr("Ошибка: " . $e->getMessage() . "\n", Console::FG_RED);
+            if (count($batch) >= $batchSize) {
+                $this->insertBatch($batch);
+                $batch = [];
+            }
         }
+
+        if (!empty($batch)) $this->insertBatch($batch);
+        $this->stdout("\nДомов загружено: $total\n", Console::FG_GREEN);
     }
 
     private function insertBatch(array $rows): void
     {
-        $logFile = $this->tempDir . '/insert_log.txt';
-
-        // Пишем в лог информацию о батче
-        $logMessage = date('Y-m-d H:i:s') . " - Вставка " . count($rows) . " записей\n";
-        file_put_contents($logFile, $logMessage, FILE_APPEND);
-
-        // Для первых 3 записей пишем подробности
-        static $loggedCount = 0;
-        if ($loggedCount < 3 && !empty($rows)) {
-            $sample = $rows[0];
-            $details = "Пример записи:\n";
-            $details .= "full_address: " . ($sample['full_address'] ?? 'NULL') . "\n";
-            $details .= "region: " . ($sample['region'] ?? 'NULL') . "\n";
-            $details .= "city: " . ($sample['city'] ?? 'NULL') . "\n";
-            $details .= "street: " . ($sample['street'] ?? 'NULL') . "\n";
-            file_put_contents($logFile, $details, FILE_APPEND);
-            $loggedCount++;
-        }
-
-        // Выводим в консоль (только если есть строки)
-        if (!empty($rows)) {
-            $this->stdout("Вставка батча из " . count($rows) . " записей... ");
-        }
-
-        try {
-            $result = Yii::$app->db->createCommand()->batchInsert(
-                Address::tableName(),
-                ['full_address', 'region', 'city', 'street', 'house', 'created_at'],
-                $rows
-            )->execute();
-            if (!empty($rows)) {
-                $this->stdout("OK\n");
-            }
-        } catch (\Exception $e) {
-            $this->stderr("Ошибка вставки: " . $e->getMessage() . "\n", Console::FG_RED);
-            // Записываем ошибку в лог
-            file_put_contents($logFile, "Ошибка: " . $e->getMessage() . "\n", FILE_APPEND);
-        }
+        Yii::$app->db->createCommand()->batchInsert(
+            Address::tableName(),
+            ['full_address', 'region', 'city', 'street', 'house', 'created_at'],
+            $rows
+        )->execute();
     }
 
     private function cleanup(): void
     {
         $this->stdout("Очистка...\n");
-//        $this->delTree($this->tempDir);
-//        mkdir($this->tempDir, 0777, true);
+        $this->delTree($this->tempDir);
+        mkdir($this->tempDir, 0777, true);
     }
 
     private function delTree(string $dir): void

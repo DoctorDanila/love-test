@@ -8,6 +8,8 @@ RUN apt-get update && apt-get install -y \
     unzip \
     git \
     curl \
+    aria2 \
+    p7zip-full \
     && docker-php-ext-install \
         pdo_pgsql \
         intl \

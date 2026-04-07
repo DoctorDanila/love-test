@@ -1,4 +1,4 @@
-.PHONY: up down build migrate load-fias test bash logs ps composer-install
+.PHONY: up down build migrate load-fias load-kladr test bash logs ps composer-install
 
 # Переменные
 DOCKER_COMPOSE 	= docker compose
@@ -24,7 +24,11 @@ migrate:
 
 # Загрузка данных ФИАС
 load-fias:
-	$(EXEC_PHP) yii fias/load
+	$(EXEC_PHP) yii fias/load $(REGION)
+
+# Загрузка данных КЛАДР
+load-kladr:
+	$(EXEC_PHP) yii kladr/load $(REGION) $(LOCAL)
 
 # Запуск всех тестов
 test:
